@@ -5,7 +5,7 @@ import pytest
 from ics_cal_mcp.errors import FeedFetchError, FeedTruncatedError
 from ics_cal_mcp.feed import FeedClient, HttpErr, HttpOk, ends_valid
 
-from conftest import FIXTURE, FIXTURE_TRUNCATED, make_config
+from conftest import FIXTURE, FIXTURE_TRUNCATED, TEST_ICS_URL, make_config
 
 
 class StubTransport:
@@ -31,7 +31,7 @@ class ManualClock:
 
 def test_serves_from_cache_within_the_ttl():
     t, clock = StubTransport(HttpOk(200, FIXTURE)), ManualClock()
-    feed = FeedClient(make_config(), t, clock)
+    feed = FeedClient(make_config(), TEST_ICS_URL, t, clock)
     feed.get_snapshot()
     clock.ms += 299_999
     feed.get_snapshot()
@@ -40,7 +40,7 @@ def test_serves_from_cache_within_the_ttl():
 
 def test_refetches_after_the_ttl_expires():
     t, clock = StubTransport(HttpOk(200, FIXTURE)), ManualClock()
-    feed = FeedClient(make_config(), t, clock)
+    feed = FeedClient(make_config(), TEST_ICS_URL, t, clock)
     feed.get_snapshot()
     clock.ms += 300_000
     feed.get_snapshot()
@@ -50,7 +50,7 @@ def test_refetches_after_the_ttl_expires():
 def test_does_not_serve_an_expired_snapshot_when_the_refetch_fails():
     t = StubTransport(HttpOk(200, FIXTURE), HttpOk(500, ""))
     clock = ManualClock()
-    feed = FeedClient(make_config(), t, clock)
+    feed = FeedClient(make_config(), TEST_ICS_URL, t, clock)
     feed.get_snapshot()
     clock.ms += 301_000
     with pytest.raises(FeedFetchError, match="HTTP 500"):
@@ -59,7 +59,7 @@ def test_does_not_serve_an_expired_snapshot_when_the_refetch_fails():
 
 def test_a_truncated_snapshot_is_reported_but_never_fresh():
     t = StubTransport(HttpOk(200, FIXTURE_TRUNCATED))
-    feed = FeedClient(make_config(), t, ManualClock())
+    feed = FeedClient(make_config(), TEST_ICS_URL, t, ManualClock())
     assert feed.get_snapshot().ends_valid is False
     with pytest.raises(FeedTruncatedError):
         feed.get_validated_raw()
@@ -67,7 +67,7 @@ def test_a_truncated_snapshot_is_reported_but_never_fresh():
 
 
 def test_maps_http_errors_without_leaking_the_url_path():
-    feed = FeedClient(make_config(), StubTransport(HttpOk(404, "")), ManualClock())
+    feed = FeedClient(make_config(), TEST_ICS_URL, StubTransport(HttpOk(404, "")), ManualClock())
     with pytest.raises(FeedFetchError) as exc:
         feed.get_snapshot()
     assert exc.value.message == (
@@ -77,19 +77,23 @@ def test_maps_http_errors_without_leaking_the_url_path():
 
 
 def test_maps_timeouts_to_a_readable_message():
-    feed = FeedClient(make_config(), StubTransport(HttpErr("timeout")), ManualClock())
+    feed = FeedClient(make_config(), TEST_ICS_URL, StubTransport(HttpErr("timeout")), ManualClock())
     with pytest.raises(FeedFetchError, match="timeout after 15000ms"):
         feed.get_snapshot()
 
 
 def test_maps_network_errors_to_the_error_class_never_a_raw_message():
-    feed = FeedClient(make_config(), StubTransport(HttpErr("io", "ConnectError")), ManualClock())
+    feed = FeedClient(
+        make_config(), TEST_ICS_URL, StubTransport(HttpErr("io", "ConnectError")), ManualClock()
+    )
     with pytest.raises(FeedFetchError, match="ConnectError$"):
         feed.get_snapshot()
 
 
 def test_counts_utf8_bytes():
-    feed = FeedClient(make_config(), StubTransport(HttpOk(200, FIXTURE)), ManualClock())
+    feed = FeedClient(
+        make_config(), TEST_ICS_URL, StubTransport(HttpOk(200, FIXTURE)), ManualClock()
+    )
     assert feed.get_snapshot().num_bytes == len(FIXTURE.encode("utf-8"))
 
 

@@ -91,8 +91,11 @@ def ends_valid(raw: str) -> bool:
 
 
 class FeedClient:
-    def __init__(self, cfg: Config, transport: Transport, clock: Clock = system_clock) -> None:
+    def __init__(
+        self, cfg: Config, url: str, transport: Transport, clock: Clock = system_clock
+    ) -> None:
         self.cfg = cfg
+        self.url = url
         self._transport = transport
         self._clock = clock
         self._slot: FeedSnapshot | None = None
@@ -125,9 +128,9 @@ class FeedClient:
         return snapshot.raw
 
     def _fetch(self) -> FeedSnapshot:
-        masked = mask_ics_url(self.cfg.ics_url)
+        masked = mask_ics_url(self.url)
         try:
-            res = self._transport.get(self.cfg.ics_url)
+            res = self._transport.get(self.url)
         except HttpErr as err:
             raise FeedFetchError(masked, self._failure_detail(err)) from None
         if not 200 <= res.status < 300:

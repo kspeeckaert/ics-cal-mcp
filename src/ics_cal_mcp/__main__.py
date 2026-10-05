@@ -28,21 +28,25 @@ def main() -> None:
         sys.stderr.write(f"{SERVER_NAME} {__version__}\n")
         return
     try:
-        cfg = load_config(os.environ.get)
+        cfg = load_config(os.environ)
     except ConfigError as err:
         log.error("Startup failed", detail=err.message)
         sys.exit(1)
 
-    feed = FeedClient(cfg, Httpx2Transport(cfg.fetch_timeout_ms))
-    state = ServerState(cfg, feed)
+    clients = {
+        f.name: FeedClient(cfg, f.url, Httpx2Transport(cfg.fetch_timeout_ms)) for f in cfg.feeds
+    }
+    state = ServerState(cfg, clients)
     log.info(
         f"{SERVER_NAME} started",
         version=__version__,
         cacheTtlSeconds=cfg.cache_ttl_seconds,
         fetchTimeoutMs=cfg.fetch_timeout_ms,
-        source=mask_ics_url(cfg.ics_url),
         tz=cfg.tz_name,
-        profile=cfg.profile.name,
+        calendars=[
+            {"name": f.name, "profile": f.profile.name, "source": mask_ics_url(f.url)}
+            for f in cfg.feeds
+        ],
     )
     try:
         anyio.run(_serve, state)

@@ -14,7 +14,7 @@ from ics_cal_mcp.ics.parse import parse_calendar
 from ics_cal_mcp.profile import EXCHANGE, GENERIC, is_exchange_url, select_profile
 from ics_cal_mcp.server import ServerState
 
-from conftest import FIXTURE, TZ, TZ_NAME, make_config, utc_ms
+from conftest import FIXTURE, TEST_ICS_URL, TZ, TZ_NAME, make_config, utc_ms
 
 # --- detection ------------------------------------------------------------
 
@@ -51,11 +51,11 @@ def test_other_feeds_use_the_generic_profile(url):
 
 def test_ics_profile_overrides_detection():
     google = "https://calendar.google.com/calendar/ical/x/basic.ics"
-    assert load_config({"ICS_URL": google}).profile is GENERIC
-    assert load_config({"ICS_URL": google, "ICS_PROFILE": "Exchange"}).profile is EXCHANGE
+    assert load_config({"ICS_URL": google}).feeds[0].profile is GENERIC
+    assert load_config({"ICS_URL": google, "ICS_PROFILE": "Exchange"}).feeds[0].profile is EXCHANGE
     exchange = "https://outlook.office365.com/owa/calendar/x/y/calendar.ics"
-    assert load_config({"ICS_URL": exchange, "ICS_PROFILE": "generic"}).profile is GENERIC
-    assert load_config({"ICS_URL": exchange, "ICS_PROFILE": "auto"}).profile is EXCHANGE
+    assert load_config({"ICS_URL": exchange, "ICS_PROFILE": "generic"}).feeds[0].profile is GENERIC
+    assert load_config({"ICS_URL": exchange, "ICS_PROFILE": "auto"}).feeds[0].profile is EXCHANGE
 
 
 def test_rejects_an_unknown_profile():
@@ -65,8 +65,9 @@ def test_rejects_an_unknown_profile():
 
 def test_feed_info_reports_the_profile():
     cfg = make_config()  # the fixture URL has /owa/calendar/ in its path
-    state = ServerState(cfg, FeedClient(cfg, _Fixed(FIXTURE), lambda: 0))
-    assert state.call_tool("feed_info", {})["structuredContent"]["profile"] == "exchange"
+    state = ServerState(cfg, {"default": FeedClient(cfg, TEST_ICS_URL, _Fixed(FIXTURE), lambda: 0)})
+    info = state.call_tool("feed_info", {})["structuredContent"]
+    assert info["calendars"][0]["profile"] == "exchange"
 
 
 class _Fixed:

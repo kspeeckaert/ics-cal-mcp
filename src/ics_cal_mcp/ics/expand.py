@@ -129,7 +129,7 @@ def _from_component(component: ParsedEvent, is_recurring: bool) -> ExpandedInsta
     return ExpandedInstance(component, Timed(start_ms, max(end_ms, start_ms)), is_recurring)
 
 
-def _sort_key(win: EventWindow, inst: ExpandedInstance) -> tuple[int, str]:
+def sort_key(win: EventWindow, inst: ExpandedInstance) -> tuple[int, str]:
     # All-day events sort at their local midnight in the window zone, so they
     # come before same-morning timed events. Ties: summary, codepoint order.
     t = inst.time
@@ -270,7 +270,7 @@ def expand_events(
             if _overlaps(win, inst):
                 emit(master.uid, slot_ms, inst)
 
-    out.sort(key=lambda inst: _sort_key(win, inst))
+    out.sort(key=lambda inst: sort_key(win, inst))
     return out
 
 

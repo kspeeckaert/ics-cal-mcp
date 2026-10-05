@@ -104,6 +104,13 @@ def mask_ics_url(url: str) -> str:
     return f"{parts.scheme}://{parts.host}/…"
 
 
+def sanitize_all(text: str, ics_urls: list[str]) -> str:
+    """`sanitize_text` for every configured feed URL."""
+    for url in ics_urls:
+        text = sanitize_text(text, url)
+    return text
+
+
 def sanitize_text(text: str, ics_url: str) -> str:
     """Remove the feed URL, its path, and its credentials from free text."""
     if not ics_url:

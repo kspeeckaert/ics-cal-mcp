@@ -1,13 +1,20 @@
 """Configuration, read and validated from the environment once at startup.
 
 Nothing else in the package reads the environment. Error messages never
-echo values back, because ICS_URL is a secret.
+echo URL values back, because feed URLs are secrets. Feed names come from
+variable names, so they are safe to show.
+
+Feeds:
+- `ICS_URL_<NAME>=<url>` defines a feed called `<name>` (lower case).
+- `ICS_URL=<url>` defines a feed called `default` (backward compatible).
+- `ICS_PROFILE_<NAME>` sets the profile of one feed. `ICS_PROFILE` sets the
+  profile for all feeds that do not have their own setting.
 """
 
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from zoneinfo import ZoneInfo
 
@@ -18,35 +25,64 @@ from .profile import PROFILE_NAMES, FeedProfile, select_profile
 DEFAULT_TZ = "Europe/Brussels"
 DEFAULT_CACHE_TTL_SECONDS = 300
 DEFAULT_FETCH_TIMEOUT_MS = 15_000
+DEFAULT_FEED_NAME = "default"
+
+URL_PREFIX = "ICS_URL_"
+PROFILE_PREFIX = "ICS_PROFILE_"
 
 _UINT_RE = re.compile(r"\+?[0-9]+")
+# Feed name: starts with a letter, then letters, digits or '_'.
+_NAME_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
+
+
+@dataclass(frozen=True)
+class FeedConfig:
+    name: str
+    url: str
+    # auto | exchange | generic
+    profile_override: str = "auto"
+
+    @property
+    def profile(self) -> FeedProfile:
+        return select_profile(self.url, self.profile_override)
 
 
 @dataclass(frozen=True)
 class Config:
-    ics_url: str
+    feeds: tuple[FeedConfig, ...]
     tz_default: ZoneInfo
     cache_ttl_seconds: int = DEFAULT_CACHE_TTL_SECONDS
     fetch_timeout_ms: int = DEFAULT_FETCH_TIMEOUT_MS
-    # auto | exchange | generic
-    profile_override: str = "auto"
 
     @property
     def tz_name(self) -> str:
         return self.tz_default.key
 
     @property
-    def profile(self) -> FeedProfile:
-        return select_profile(self.ics_url, self.profile_override)
+    def feed_names(self) -> list[str]:
+        return [f.name for f in self.feeds]
+
+    @property
+    def urls(self) -> list[str]:
+        return [f.url for f in self.feeds]
 
 
-def load_config(get: Callable[[str], str | None] | Mapping[str, str]) -> Config:
+def _profile_value(raw: str | None, var_name: str, issues: list[str]) -> str | None:
+    if raw is None:
+        return None
+    value = raw.strip().lower()
+    if value in PROFILE_NAMES:
+        return value
+    issues.append(f"{var_name} must be one of: " + ", ".join(PROFILE_NAMES))
+    return None
+
+
+def load_config(env: Mapping[str, str]) -> Config:
     """Parse the configuration. A value that trims to empty counts as unset.
     All problems are collected and reported together."""
-    getter = get.get if isinstance(get, Mapping) else get
 
     def var(key: str) -> str | None:
-        value = getter(key)
+        value = env.get(key)
         if value is None or not value.strip():
             return None
         return value
@@ -69,14 +105,6 @@ def load_config(get: Callable[[str], str | None] | Mapping[str, str]) -> Config:
         else:
             issues.append("FETCH_TIMEOUT_MS must be a positive integer")
 
-    ics_url = var("ICS_URL")
-    if ics_url is None:
-        issues.append("ICS_URL is required")
-    else:
-        parts = parse_url(ics_url)
-        if parts is None or parts.scheme not in ("http", "https"):
-            issues.append("ICS_URL must be an http(s) URL")
-
     tz: ZoneInfo | None = ZoneInfo(DEFAULT_TZ)
     raw = var("TZ_DEFAULT")
     if raw is not None:
@@ -84,21 +112,59 @@ def load_config(get: Callable[[str], str | None] | Mapping[str, str]) -> Config:
         if tz is None:
             issues.append("TZ_DEFAULT must be a valid IANA timezone")
 
-    profile_override = "auto"
-    raw = var("ICS_PROFILE")
-    if raw is not None:
-        if raw.strip().lower() in PROFILE_NAMES:
-            profile_override = raw.strip().lower()
-        else:
-            issues.append("ICS_PROFILE must be one of: " + ", ".join(PROFILE_NAMES))
+    global_profile = _profile_value(var("ICS_PROFILE"), "ICS_PROFILE", issues) or "auto"
+
+    # Collect feeds: (name, variable name, url).
+    found: list[tuple[str, str, str]] = []
+    plain = var("ICS_URL")
+    if plain is not None:
+        found.append((DEFAULT_FEED_NAME, "ICS_URL", plain))
+    for key in sorted(env):
+        if not key.upper().startswith(URL_PREFIX) or var(key) is None:
+            continue
+        suffix = key[len(URL_PREFIX) :]
+        if not _NAME_RE.fullmatch(suffix):
+            issues.append(
+                f"{key}: the feed name after {URL_PREFIX} must start with a letter and "
+                "contain only letters, digits and _"
+            )
+            continue
+        found.append((suffix.lower(), key, var(key) or ""))
+
+    feeds: list[FeedConfig] = []
+    seen: dict[str, str] = {}
+    for name, key, url in found:
+        if name in seen:
+            issues.append(f"{key} and {seen[name]} both define the feed '{name}'")
+            continue
+        seen[name] = key
+        parts = parse_url(url)
+        if parts is None or parts.scheme not in ("http", "https"):
+            issues.append(f"{key} must be an http(s) URL")
+            continue
+        own = _profile_value(
+            var(PROFILE_PREFIX + name.upper()), PROFILE_PREFIX + name.upper(), issues
+        )
+        feeds.append(FeedConfig(name=name, url=url, profile_override=own or global_profile))
+
+    if not found:
+        issues.append("ICS_URL or at least one ICS_URL_<NAME> is required")
+
+    # A profile setting for a feed that does not exist is almost always a typo.
+    for key in sorted(env):
+        if key.upper().startswith(PROFILE_PREFIX) and var(key) is not None:
+            name = key[len(PROFILE_PREFIX) :].lower()
+            if name not in seen:
+                issues.append(f"{key} does not match any feed")
 
     if issues:
         raise ConfigError("; ".join(issues))
-    assert ics_url is not None and tz is not None
+    assert tz is not None
+    # 'default' first, then the named feeds in alphabetical order.
+    feeds.sort(key=lambda f: (f.name != DEFAULT_FEED_NAME, f.name))
     return Config(
-        ics_url=ics_url,
+        feeds=tuple(feeds),
         tz_default=tz,
         cache_ttl_seconds=cache_ttl,
         fetch_timeout_ms=fetch_timeout,
-        profile_override=profile_override,
     )

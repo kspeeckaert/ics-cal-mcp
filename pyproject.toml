@@ -1,12 +1,12 @@
 [project]
 name = "ics-cal-mcp"
-version = "1.0.20261005"
-description = "Read-only MCP server that exposes an Outlook/Exchange published ICS calendar feed as MCP tools"
+version = "1.1.20261005"
+description = "Read-only MCP server that exposes published ICS calendar feeds (Outlook/Exchange, Google, iCloud, ...) as MCP tools"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
-authors = [{ name = "Kristof Speeckaert", email = "kspeeckaert@inimco.com" }]
+authors = [{ name = "Kristof", email = "" }]
 keywords = ["mcp", "ics", "icalendar", "calendar", "outlook", "exchange"]
 classifiers = [
     "Development Status :: 4 - Beta",

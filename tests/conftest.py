@@ -13,7 +13,7 @@ from functools import lru_cache
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from ics_cal_mcp.config import Config
+from ics_cal_mcp.config import Config, FeedConfig
 from ics_cal_mcp.ics.expand import ExpandedInstance, Timed, day_window, expand_events
 from ics_cal_mcp.ics.model import ParsedCalendar
 from ics_cal_mcp.ics.parse import parse_calendar
@@ -38,9 +38,12 @@ FIXTURE_TRUNCATED = read_fixture("feed-truncated.ics")
 TEST_ICS_URL = "https://feedhost.example.com/owa/calendar/SECRETPATH123/reachcalendar.ics"
 
 
-def make_config(**overrides: object) -> Config:
+def make_config(feeds: dict[str, str] | None = None, **overrides: object) -> Config:
+    """Config with the given feeds (name -> URL). Default: one feed called
+    'default' with TEST_ICS_URL."""
+    feeds = feeds or {"default": TEST_ICS_URL}
     values: dict[str, object] = {
-        "ics_url": TEST_ICS_URL,
+        "feeds": tuple(FeedConfig(name=n, url=u) for n, u in feeds.items()),
         "tz_default": TZ,
         "cache_ttl_seconds": 300,
         "fetch_timeout_ms": 15_000,

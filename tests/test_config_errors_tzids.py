@@ -24,7 +24,7 @@ ICS_URL = "https://outlook.office365.com/owa/calendar/abc123secret/reachcalendar
 
 def test_applies_defaults_when_only_ics_url_is_set():
     cfg = load_config({"ICS_URL": ICS_URL})
-    assert cfg.ics_url == ICS_URL
+    assert [(f.name, f.url) for f in cfg.feeds] == [("default", ICS_URL)]
     assert cfg.tz_name == DEFAULT_TZ == "Europe/Brussels"
     assert cfg.cache_ttl_seconds == 300
     assert cfg.fetch_timeout_ms == 15_000
@@ -45,7 +45,9 @@ def test_accepts_explicit_overrides():
 
 
 def test_fails_without_ics_url():
-    with pytest.raises(ConfigError, match="ICS_URL is required") as exc:
+    with pytest.raises(
+        ConfigError, match="ICS_URL or at least one ICS_URL_<NAME> is required"
+    ) as exc:
         load_config({})
     assert exc.value.code == "CONFIG"
     with pytest.raises(ConfigError, match="ICS_URL"):
@@ -223,3 +225,57 @@ def test_normalize_is_idempotent_and_keeps_line_endings():
     once = normalize_tzids(source, TZ_NAME).ics
     assert normalize_tzids(once, TZ_NAME).ics == once
     assert once.endswith("\nA:1\rB:2\r\n")
+
+
+# --- several feeds --------------------------------------------------------
+
+GOOGLE = "https://calendar.google.com/calendar/ical/x/private-abc/basic.ics"
+
+
+def test_named_feeds_are_lower_case_with_default_first():
+    cfg = load_config({"ICS_URL_WORK": ICS_URL, "ICS_URL_Home_2": GOOGLE, "ICS_URL": GOOGLE})
+    assert cfg.feed_names == ["default", "home_2", "work"]
+    assert [f.profile.name for f in cfg.feeds] == ["generic", "generic", "exchange"]
+
+
+def test_only_named_feeds_is_valid():
+    cfg = load_config({"ICS_URL_WORK": ICS_URL})
+    assert cfg.feed_names == ["work"]
+
+
+def test_blank_named_feeds_are_ignored():
+    cfg = load_config({"ICS_URL_WORK": ICS_URL, "ICS_URL_OLD": "  "})
+    assert cfg.feed_names == ["work"]
+
+
+def test_per_feed_profile_overrides_the_global_profile():
+    cfg = load_config(
+        {
+            "ICS_URL_WORK": ICS_URL,
+            "ICS_URL_HOME": GOOGLE,
+            "ICS_PROFILE": "exchange",
+            "ICS_PROFILE_WORK": "generic",
+        }
+    )
+    assert {f.name: f.profile.name for f in cfg.feeds} == {"home": "exchange", "work": "generic"}
+
+
+def test_rejects_bad_feed_names_duplicates_and_orphan_profiles_without_echoing_urls():
+    with pytest.raises(ConfigError) as exc:
+        load_config(
+            {
+                "ICS_URL_1X": ICS_URL,
+                "ICS_URL": ICS_URL,
+                "ICS_URL_DEFAULT": GOOGLE,
+                "ICS_URL_BAD": "ftp://secret-host.example/x",
+                "ICS_PROFILE_NOPE": "generic",
+                "ICS_PROFILE_DEFAULT": "weird",
+            }
+        )
+    msg = exc.value.message
+    assert "ICS_URL_1X: the feed name" in msg
+    assert "ICS_URL_DEFAULT and ICS_URL both define the feed 'default'" in msg
+    assert "ICS_URL_BAD must be an http(s) URL" in msg
+    assert "ICS_PROFILE_NOPE does not match any feed" in msg
+    assert "ICS_PROFILE_DEFAULT must be one of" in msg
+    assert "secret" not in msg and "abc123secret" not in msg
